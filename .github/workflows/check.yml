@@ -1,0 +1,31 @@
+name: Check Mont Saint-Michel Tour
+
+on:
+  schedule:
+    # 每 30 分鐘自動執行一次
+    - cron: '15,45 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Playwright & Requests
+        run: |
+          pip install playwright requests
+          playwright install chromium
+
+      - name: Run Ticket Checker
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python check_mont.py

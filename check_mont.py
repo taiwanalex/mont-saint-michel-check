@@ -18,7 +18,7 @@ def send_telegram(token: str, text: str, silent: bool = False):
         "chat_id": TG_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+        "disable_web_page_preview": False,
         "disable_notification": silent
     }
     try:
@@ -61,14 +61,13 @@ def run_check():
             except Exception:
                 pass
 
-        # 2. 切換月份直到 December 2026 出現
+        # 2. 切換月份至 December 2026
         for _ in range(4):
             body_content = page.content()
             if "December 2026" in body_content or "décembre 2026" in body_content.lower():
                 print("[INFO] 已成功切換至 2026 年 12 月日曆。")
                 break
             
-            # 尋找下個月箭頭按鈕
             next_arrow = page.locator(".fc-next-button, button[aria-label*='next'], .calendar-next, button.next, [class*='next']")
             if next_arrow.count() > 0 and next_arrow.first.is_visible():
                 next_arrow.first.click()
@@ -78,7 +77,7 @@ def run_check():
 
         page.wait_for_timeout(2000)
 
-        # 3. 精確定位 2026-12-30
+        # 3. 定位 2026-12-30 單元格
         date_cell = page.locator("[data-date='2026-12-30'], td[data-date*='12-30']")
         if date_cell.count() > 0:
             cell_class = date_cell.first.get_attribute("class") or ""
@@ -94,7 +93,6 @@ def run_check():
             else:
                 current_status = "Inactive"
         else:
-            # 備用文字解析：直接比對 12 月的內文
             page_text = page.inner_text("body")
             if "30" in page_text:
                 lines = [l.strip() for l in page_text.splitlines() if l.strip()]
@@ -109,7 +107,6 @@ def run_check():
                             current_status = "Inactive"
                             break
 
-        # 只要不是 Available，一律視為未放票的 Inactive
         if current_status == "未知 / 未取得":
             current_status = "Inactive"
 
@@ -125,12 +122,14 @@ def run_check():
         alert_msg = (
             "🚨 <b>【聖米歇爾山】12/30 深度英文導覽已放票！</b>\n\n"
             f"🕒 查驗時間：{now_str} (TW)\n"
-            "📌 項目：Conference tour in English (2h00)\n"
-            f"📅 日期：{target_date}\n"
-            f"⚡ 狀態：<b>{current_status} (可預約)</b>\n\n"
-            f"🔗 <b>立即前往預約：</b>\n{target_url}"
+            "📌 導覽項目：Conference tour in English (2h00)\n"
+            f"📅 預約日期：<b>{target_date}</b>\n"
+            f"⚡ 當前狀態：<b>{current_status} (名額開放)</b>\n\n"
+            "👉 <b>【點此立即開啟官方訂位頁面】</b>\n"
+            f"{target_url}\n\n"
+            "<i>請儘速點擊上方連結完成場次時段選取與結帳！</i>"
         )
-        print("[ALERT] 12/30 開放！Alert Bot 發送通知！")
+        print("[ALERT] 12/30 開放！Alert Bot 發送訂位通知！")
         send_telegram(ALERT_BOT_TOKEN, alert_msg, silent=False)
     else:
         status_msg = (

@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 from datetime import datetime
 import pytz
 from playwright.sync_api import sync_playwright
@@ -43,78 +42,76 @@ def run_check():
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             locale="en-GB",
-            viewport={"width": 1280, "height": 800}
+            viewport={"width": 1280, "height": 900}
         )
         page = context.new_page()
 
-        # 監聽網路傳輸，攔截日曆資料 API
-        api_data = {}
-        def handle_response(response):
-            if any(k in response.url for k in ["availability", "calendrier", "calendar", "products", "seance"]):
-                try:
-                    if "json" in response.headers.get("content-type", ""):
-                        data = response.json()
-                        api_data[response.url] = data
-                except Exception:
-                    pass
-
-        page.on("response", handle_response)
-
         print(f"[{now_str}] 正在連線聖米歇爾山官方售票日曆...")
         page.goto(target_url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(3000)
 
-        # 處理並關閉 Cookie 隱私彈窗（若存在）
-        try:
-            cookie_btn = page.locator("button#tarteaucitronPersonalize2, button:has-text('Accept all'), button:has-text('Tout accepter'), button:has-text('Allow all')")
-            if cookie_btn.count() > 0 and cookie_btn.first.is_visible():
-                cookie_btn.first.click()
-                page.wait_for_timeout(1000)
-        except Exception:
-            pass
-
-        # 等待日曆渲染完成
-        page.wait_for_timeout(5000)
-
-        # 檢查月份，若在 11 月則切換至 12 月
-        try:
-            body_text = page.inner_text("body")
-            if "December" not in body_text:
-                next_btns = page.locator("button[aria-label*='Next'], [class*='next'], .calendar-next, button:has-text('>')")
-                if next_btns.count() > 0:
-                    next_btns.first.click()
-                    page.wait_for_timeout(3000)
-        except Exception:
-            pass
-
-        # 解析畫面上的日期文字
-        full_text = page.inner_text("body")
-        lines = [l.strip() for l in full_text.splitlines() if l.strip()]
-
-        for i, line in enumerate(lines):
-            if line == "30" and i + 1 < len(lines):
-                candidate = lines[i + 1]
-                # 排除一般月份文字，確認是狀態詞
-                if any(k in candidate.lower() for k in ["inactive", "available", "sold out", "full", "complet"]):
-                    current_status = candidate
+        # 1. 關閉 Cookie 遮罩
+        for btn_sel in ["#tarteaucitronPersonalize2", "button:has-text('Accept')", "button:has-text('Accepter')"]:
+            try:
+                btn = page.locator(btn_sel)
+                if btn.count() > 0 and btn.first.is_visible():
+                    btn.first.click()
+                    page.wait_for_timeout(1000)
                     break
+            except Exception:
+                pass
 
-        # 備用 DOM 定位
+        # 2. 切換月份直到 December 2026 出現
+        for _ in range(4):
+            body_content = page.content()
+            if "December 2026" in body_content or "décembre 2026" in body_content.lower():
+                print("[INFO] 已成功切換至 2026 年 12 月日曆。")
+                break
+            
+            # 尋找下個月箭頭按鈕
+            next_arrow = page.locator(".fc-next-button, button[aria-label*='next'], .calendar-next, button.next, [class*='next']")
+            if next_arrow.count() > 0 and next_arrow.first.is_visible():
+                next_arrow.first.click()
+                page.wait_for_timeout(2000)
+            else:
+                break
+
+        page.wait_for_timeout(2000)
+
+        # 3. 精確定位 2026-12-30
+        date_cell = page.locator("[data-date='2026-12-30'], td[data-date*='12-30']")
+        if date_cell.count() > 0:
+            cell_class = date_cell.first.get_attribute("class") or ""
+            cell_html = date_cell.first.inner_html().lower()
+            cell_text = date_cell.first.inner_text().strip()
+            print(f"[DEBUG] 抓取到 12-30 單元格: class='{cell_class}', text='{cell_text}'")
+
+            if "available" in cell_class.lower() or "disponible" in cell_class.lower() or "available" in cell_html:
+                current_status = "Available"
+                is_available = True
+            elif "disabled" in cell_class.lower() or "inactive" in cell_class.lower() or "fc-day-disabled" in cell_class:
+                current_status = "Inactive"
+            else:
+                current_status = "Inactive"
+        else:
+            # 備用文字解析：直接比對 12 月的內文
+            page_text = page.inner_text("body")
+            if "30" in page_text:
+                lines = [l.strip() for l in page_text.splitlines() if l.strip()]
+                for i, l in enumerate(lines):
+                    if l == "30" and i + 1 < len(lines):
+                        nxt = lines[i + 1].lower()
+                        if "available" in nxt:
+                            current_status = "Available"
+                            is_available = True
+                            break
+                        elif "inactive" in nxt or "indisponible" in nxt:
+                            current_status = "Inactive"
+                            break
+
+        # 只要不是 Available，一律視為未放票的 Inactive
         if current_status == "未知 / 未取得":
-            elements = page.locator("xpath=//*[text()='30' or contains(text(), ' 30 ')]").all()
-            for el in elements:
-                try:
-                    parent_text = el.locator("xpath=..").inner_text().strip()
-                    if "inactive" in parent_text.lower():
-                        current_status = "Inactive"
-                        break
-                    elif "available" in parent_text.lower():
-                        current_status = "Available"
-                        break
-                except Exception:
-                    continue
-
-        if "available" in current_status.lower() and "inactive" not in current_status.lower():
-            is_available = True
+            current_status = "Inactive"
 
         browser.close()
 

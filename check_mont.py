@@ -11,21 +11,20 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID", "8777128716")
 
 def send_telegram(token: str, text: str, silent: bool = False):
     if not token:
-        print("[WARN] Telegram Bot Token 未設定，本地輸出訊息：\n", text)
+        print("[WARN] Telegram Bot Token 未設定，直接印出訊息：\n", text)
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
         "chat_id": TG_CHAT_ID,
         "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False,
+        "disable_web_page_preview": True,
         "disable_notification": silent
     }
     try:
         resp = requests.post(url, json=payload, timeout=15)
-        print(f"[TG] 發送狀態碼: {resp.status_code}")
+        print(f"[TG] 發送狀態碼: {resp.status_code}, 回應: {resp.text}")
     except Exception as e:
-        print(f"[TG] 發送失敗: {e}")
+        print(f"[TG] 發送例外失敗: {e}")
 
 def run_check():
     tz = pytz.timezone("Asia/Taipei")
@@ -34,7 +33,7 @@ def run_check():
 
     target_url = "https://tickets.monuments-nationaux.fr/en-GB/products?famille=2032864763370400282&product=2308732817290400284"
     
-    current_status = "未知 / 未取得"
+    current_status = "Inactive"
     is_available = False
 
     with sync_playwright() as p:
@@ -107,9 +106,6 @@ def run_check():
                             current_status = "Inactive"
                             break
 
-        if current_status == "未知 / 未取得":
-            current_status = "Inactive"
-
         browser.close()
 
     print("=" * 45)
@@ -120,26 +116,22 @@ def run_check():
 
     if is_available:
         alert_msg = (
-            "🚨 <b>【聖米歇爾山】12/30 深度英文導覽已放票！</b>\n\n"
-            f"🕒 查驗時間：{now_str} (TW)\n"
-            "📌 導覽項目：Conference tour in English (2h00)\n"
-            f"📅 預約日期：<b>{target_date}</b>\n"
-            f"⚡ 當前狀態：<b>{current_status} (名額開放)</b>\n\n"
-            "👉 <b>【點此立即開啟官方訂位頁面】</b>\n"
-            f"{target_url}\n\n"
-            "<i>請儘速點擊上方連結完成場次時段選取與結帳！</i>"
+            f"🚨 【已放票！】\n"
+            f"{now_str} (TW)\n"
+            f"日期：{target_date}\n"
+            f"狀態：{current_status}\n"
+            f"官網：{target_url}"
         )
-        print("[ALERT] 12/30 開放！Alert Bot 發送訂位通知！")
+        print("[ALERT] 12/30 開放！Alert Bot 發送通知！")
         send_telegram(ALERT_BOT_TOKEN, alert_msg, silent=False)
     else:
         status_msg = (
-            "ℹ️ <b>【聖米歇爾山票況巡檢】</b>\n\n"
-            f"🕒 檢查時間：{now_str} (TW)\n"
-            f"📅 查詢日期：{target_date}\n"
-            f"📊 當前狀態：<b>{current_status}</b>\n"
-            "<i>（維持 30 分鐘自動監控中）</i>"
+            f"{now_str} (TW)\n"
+            f"日期：{target_date}\n"
+            f"狀態：{current_status}\n"
+            f"官網：{target_url}"
         )
-        print(f"[STATUS] 目前狀態為 {current_status}，Mute Bot 發送記錄。")
+        print(f"[STATUS] 目前狀態為 {current_status}，發送記錄。")
         send_telegram(MUTE_BOT_TOKEN, status_msg, silent=True)
 
 if __name__ == "__main__":

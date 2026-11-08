@@ -5,7 +5,6 @@ import pytz
 from playwright.sync_api import sync_playwright
 import requests
 
-# 雙 Bot Token 設定
 ALERT_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 MUTE_BOT_TOKEN = os.getenv("TG_MUTE_BOT_TOKEN", ALERT_BOT_TOKEN)
 TG_CHAT_ID = os.getenv("TG_CHAT_ID", "8777128716")
@@ -43,21 +42,55 @@ def run_check():
         page = context.new_page()
 
         print(f"[{now_str}] 正在連線聖米歇爾山官方售票日曆...")
-        page.goto(target_url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(3000)
+        page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
 
+        # 等待日曆組件或載入動畫完成
+        try:
+            page.wait_for_selector(".calendar, [class*='calendar'], table", timeout=15000)
+        except Exception:
+            pass
+        page.wait_for_timeout(4000)
+
+        # 確保顯示 12 月份（若當前是 11 月，點擊切換下一月）
+        content = page.content()
+        if "December" not in content and "12" not in page.title():
+            next_btn = page.locator("button[aria-label*='Next'], [class*='next'], .calendar-next, button:has-text('>')")
+            if next_btn.count() > 0:
+                next_btn.first.click()
+                page.wait_for_timeout(2000)
+
+        # 抓取日曆所有文字內容
         page_text = page.inner_text("body")
         lines = [l.strip() for l in page_text.splitlines() if l.strip()]
 
         current_status = "未知 / 未取得"
         is_available = False
 
+        # 方法 1：以文字排列順序比對（30 號下一行）
         for i, line in enumerate(lines):
             if line == "30" and i + 1 < len(lines):
-                current_status = lines[i + 1]
-                if "available" in current_status.lower() and "inactive" not in current_status.lower():
-                    is_available = True
-                break
+                candidate = lines[i + 1]
+                if any(k in candidate.lower() for k in ["inactive", "available", "sold out", "full"]):
+                    current_status = candidate
+                    break
+
+        # 方法 2：若方法 1 沒抓到，以 DOM 節點屬性檢查
+        if current_status == "未知 / 未取得":
+            day_btn = page.locator("xpath=//*[text()='30' or contains(text(), ' 30 ')]/ancestor::*[self::td or self::button or self::div][1]")
+            if day_btn.count() > 0:
+                node_html = day_btn.first.inner_html().lower()
+                node_class = day_btn.first.get_attribute("class") or ""
+                node_text = day_btn.first.inner_text().strip()
+                
+                if "inactive" in node_html or "disabled" in node_class.lower() or "inactive" in node_class.lower():
+                    current_status = "Inactive"
+                elif "available" in node_html or "available" in node_class.lower():
+                    current_status = "Available"
+                elif node_text:
+                    current_status = node_text.replace("\n", " ")
+
+        if "available" in current_status.lower() and "inactive" not in current_status.lower():
+            is_available = True
 
         browser.close()
 
@@ -76,7 +109,7 @@ def run_check():
                 f"⚡ 狀態：<b>{current_status} (可預約)</b>\n\n"
                 f"🔗 <b>立即前往預約：</b>\n{target_url}"
             )
-            print("[ALERT] 12/30 開放！Alert Bot 發送緊急通知！")
+            print("[ALERT] 12/30 開放！Alert Bot 發送通知！")
             send_telegram(ALERT_BOT_TOKEN, alert_msg, silent=False)
         else:
             status_msg = (
@@ -86,7 +119,7 @@ def run_check():
                 f"📊 當前狀態：<b>{current_status}</b>\n"
                 "<i>（維持 30 分鐘自動監控中）</i>"
             )
-            print(f"[STATUS] 目前狀態為 {current_status}，Mute Bot 發送靜音記錄。")
+            print(f"[STATUS] 目前狀態為 {current_status}，Mute Bot 發送記錄。")
             send_telegram(MUTE_BOT_TOKEN, status_msg, silent=True)
 
 if __name__ == "__main__":

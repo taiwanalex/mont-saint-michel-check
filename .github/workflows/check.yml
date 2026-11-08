@@ -2,8 +2,8 @@ name: Check Mont Saint-Michel Tour
 
 on:
   schedule:
-    # 每 30 分鐘自動執行一次
-    - cron: '15,45 * * * *'
+    # 每 2 小時執行一次（偶數點的 15 分）
+    - cron: '15 */2 * * *'
   workflow_dispatch:
 
 env:
